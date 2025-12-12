@@ -9,11 +9,11 @@ from tqdm import tqdm
 # ========== USER CONFIG ==========
 symbol = "SOLUSDT"
 category = "spot"
-backtest_days = 7
+backtest_days = 2
 STARTING_BALANCE = 1000
 bybit_fee = 0.001
-leverage = 3
-agg_minutes = 57
+leverage = 10
+agg_minutes = 16
 
 imbalance_range = range(1, 155)
 ema_range = range(2, 181, 5)
