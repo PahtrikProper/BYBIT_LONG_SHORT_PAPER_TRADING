@@ -3,7 +3,7 @@
 ## What this repo does
 This script performs **long-only scalp research on Bybit SOLUSDT spot data**. It:
 - Downloads recent candles from Bybit's public API, aggregates them to a configurable timeframe (default 5 minutes), and optimizes a simple entry/exit rule set.
-- Runs a grid search over imbalance lookback and EMA length while keeping a fixed take-profit of **0.33% price move** (≈3.3% at 10x leverage) to keep the live loop aligned with the optimizer; the TP is locked to this value.
+
 - Simulates fills with spread, slippage, and order-rejection probabilities so the backtester behaves closer to the live paper trader.
 - Enters one long position at a time when price dips into recent lows while staying above a rising EMA; exits at the fixed TP or marks a total loss if liquidation is reached.
 - Continuously paper-trades the best-performing long parameters in an infinite loop (no real orders are sent).
@@ -25,7 +25,6 @@ This script performs **long-only scalp research on Bybit SOLUSDT spot data**. It
 - `agg_minutes`: bar size for both backtest and live loop (defaults to 5m).
 - `STARTING_BALANCE`, `leverage`, `bybit_fee`: account model for PnL math.
 - `spread_bps`, `slippage_bps`, `order_reject_prob`, `max_fill_latency`: live-style fill modeling shared by backtest and paper trader.
-- `imbalance_range`, `ema_range`: search spaces for the optimizer; **take-profit is fixed** via `SCALP_TP_PCT=0.0033` (0.33% pre-leverage move, ~3.3% at 10x) to avoid overfitting.
 
 ## Strategy logic
 - **Entry (long-only):**
