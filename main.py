@@ -22,9 +22,9 @@ max_fill_latency = 0.5  # seconds
 
 imbalance_range = range(1, 155)
 ema_range = range(2, 181, 5)
-SCALP_TP_PCT = 0.0034  # Fixed 0.34% scalp target (price move, pre-leverage)
-# Do not search TP—keep the live paper trader locked to a 0.34% price move
-# before leverage (≈3.4% on 10x) to avoid optimizing the take-profit.
+SCALP_TP_PCT = 0.0033  # Fixed 0.33% scalp target (price move, pre-leverage)
+# Do not search TP—keep the live paper trader locked to a 0.33% price move
+# before leverage (≈3.3% on 10x) to avoid optimizing the take-profit.
 
 def fetch_bybit_1m(symbol, category, limit=1000, days=backtest_days):
     end = int(datetime.utcnow().timestamp())
