@@ -274,17 +274,36 @@ def optimize_timeframe(interval_minutes):
     df = df.tail(200)
 
     results_long = []
-    for imb, ema in tqdm(
+    total_paths = len(imbalance_range) * len(ema_range)
+    progress = tqdm(
         product(imbalance_range, ema_range),
-        total=len(imbalance_range) * len(ema_range),
+        total=total_paths,
         desc=f"Param search {interval_minutes}m", ncols=80
-    ):
-        results_long.append({
-            "imbalance": imb, "ema": ema, "tp_pct": SCALP_TP_PCT, "direction": "long", **dict(zip([
-                "pnl_pct", "pnl_value", "final_balance",
-                "avg_win", "avg_loss", "win_rate", "rr_ratio",
-                "sharpe", "drawdown", "wins", "losses"
-            ], run_backtest(df, imb, ema, SCALP_TP_PCT, interval_minutes)))
+    )
+
+    best_snapshot = {"pnl_pct": -np.inf, "win_rate": 0, "imbalance": None, "ema": None}
+
+    for idx, (imb, ema) in enumerate(progress, start=1):
+        metrics = dict(zip([
+            "pnl_pct", "pnl_value", "final_balance",
+            "avg_win", "avg_loss", "win_rate", "rr_ratio",
+            "sharpe", "drawdown", "wins", "losses"
+        ], run_backtest(df, imb, ema, SCALP_TP_PCT, interval_minutes)))
+
+        results_long.append({"imbalance": imb, "ema": ema, "tp_pct": SCALP_TP_PCT, "direction": "long", **metrics})
+
+        if metrics["pnl_pct"] > best_snapshot["pnl_pct"]:
+            best_snapshot.update({
+                "pnl_pct": metrics["pnl_pct"],
+                "win_rate": metrics["win_rate"],
+                "imbalance": imb,
+                "ema": ema,
+            })
+
+        progress.set_postfix({
+            "best_pnl%": f"{best_snapshot['pnl_pct']:.2f}",
+            "best_wr%": f"{best_snapshot['win_rate']:.2f}",
+            "done": f"{idx}/{total_paths}"
         })
 
     dfres_long = pd.DataFrame(results_long)
@@ -319,6 +338,38 @@ def mark_to_market_equity(equity, position, entry_price, qty, last_price):
     if position == 1:
         return equity + (last_price - entry_price) * qty
     return equity
+
+
+def summarize_trades(tradelog):
+    if not tradelog:
+        return {
+            "total": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "total_pnl": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+        }
+
+    trades_df = pd.DataFrame(tradelog)
+    total_pnl = trades_df["pnl"].sum()
+    total_trades = len(trades_df)
+    wins_df = trades_df[trades_df["pnl"] > 0]
+    losses_df = trades_df[trades_df["pnl"] <= 0]
+    win_rate = len(wins_df) / total_trades * 100 if total_trades > 0 else 0.0
+    avg_win = wins_df["pnl"].mean() if len(wins_df) > 0 else 0.0
+    avg_loss = losses_df["pnl"].mean() if len(losses_df) > 0 else 0.0
+
+    return {
+        "total": total_trades,
+        "wins": len(wins_df),
+        "losses": len(losses_df),
+        "win_rate": win_rate,
+        "total_pnl": total_pnl,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+    }
 
 
 print("\n--- Live paper trader running parallel timeframes ---\n")
@@ -456,23 +507,12 @@ while True:   # INFINITE LOOP, stop with Ctrl+C
             else:
                 print(f"{nowstr} | {tf}m | Equity: {tf_state['equity']:.2f} | Trades: {len(tf_state['tradelog'])}")
 
-            if len(tf_state["tradelog"]) > 0:
-                trades_df = pd.DataFrame(tf_state["tradelog"])
-                total_pnl = trades_df["pnl"].sum()
-                total_trades = len(trades_df)
-                wins = trades_df[trades_df["pnl"] > 0]
-                losses = trades_df[trades_df["pnl"] <= 0]
-                win_rate = len(wins) / total_trades * 100 if total_trades > 0 else 0
-                avg_win = wins["pnl"].mean() if len(wins) > 0 else 0
-                avg_loss = losses["pnl"].mean() if len(losses) > 0 else 0
-                print(f"\n==== LIVE SUMMARY (LONG ONLY, {tf}m) ====")
-                print(f"Total trades: {total_trades}")
-                print(f"Wins: {len(wins)} | Losses: {len(losses)}")
-                print(f"Win rate: {win_rate:.2f}%")
-                print(f"Total PnL: {total_pnl:.2f}")
-                print(f"Average win: {avg_win:.2f}")
-                print(f"Average loss: {avg_loss:.2f}")
-                print("=====================================\n")
+            stats = summarize_trades(tf_state["tradelog"])
+            print(
+                f"{nowstr} | {tf}m | Price={close:.4f} | Trades={stats['total']} | "
+                f"WR={stats['win_rate']:.2f}% | RealizedPnL={stats['total_pnl']:.2f} | "
+                f"AvgWin={stats['avg_win']:.2f} | AvgLoss={stats['avg_loss']:.2f}"
+            )
 
         time.sleep(sleep_seconds)
 
