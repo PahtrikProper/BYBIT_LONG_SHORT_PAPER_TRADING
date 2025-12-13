@@ -6,7 +6,7 @@ This script performs **long-only scalp research on Bybit SOLUSDT spot data**. It
 - Runs a grid search over imbalance lookback and EMA length while keeping a fixed take-profit of **0.33% price move** (≈3.3% at 10x leverage) to keep the live loop aligned with the optimizer; the TP is locked to this value.
 - Simulates fills with spread, slippage, and order-rejection probabilities so the backtester behaves closer to the live paper trader.
 - Enters one long position at a time when price dips into recent lows while staying above a rising EMA; exits at the fixed TP or marks a total loss if liquidation is reached.
-- Continuously paper-trades the best-performing **5m and 15m** long parameters in parallel, each with its own optimized settings (no real orders are sent).
+- Continuously paper-trades the best-performing **5m and 15m** long parameters in parallel, each with its own optimized settings (no real orders are sent) and processes **only the latest completed bar per timeframe** to avoid duplicate signals between closes.
 
 ## Quick start
 1. **Install dependencies**
@@ -22,7 +22,7 @@ This script performs **long-only scalp research on Bybit SOLUSDT spot data**. It
 ## Core configuration (top of `main.py`)
 - `symbol`/`category`: instrument to fetch (default `SOLUSDT` spot).
 - `backtest_days`: historical window used to build the optimizer dataset.
-- `timeframes`: list of candle durations to optimize and trade (default `[5, 15]` minutes for concurrent 5m + 15m operation).
+- `timeframes`: list of candle durations to optimize and trade (default `[5, 15]` minutes for concurrent 5m + 15m operation). The live loop fetches only the latest bars (no full-history re-download each cycle) and acts once per closed bar.
 - `STARTING_BALANCE`, `leverage`, `bybit_fee`: account model for PnL math.
 - `spread_bps`, `slippage_bps`, `order_reject_prob`, `max_fill_latency`: live-style fill modeling shared by backtest and paper trader.
 - `imbalance_range`, `ema_range`: search spaces for the optimizer; **take-profit is fixed** via `SCALP_TP_PCT=0.0033` (0.33% pre-leverage move, ~3.3% at 10x) to avoid overfitting.

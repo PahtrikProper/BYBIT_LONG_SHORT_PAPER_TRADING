@@ -26,22 +26,57 @@ SCALP_TP_PCT = 0.0033  # Fixed 0.33% scalp target (price move, pre-leverage)
 # Do not search TP—keep the live paper trader locked to a 0.33% price move
 # before leverage (≈3.3% on 10x) to avoid optimizing the take-profit.
 
-def fetch_bybit_candles(symbol, category, interval_minutes, limit=1000, days=backtest_days):
-    """Fetch raw Bybit candles at the requested interval (no resampling)."""
+def _parse_candles(rows):
+    df = pd.DataFrame(rows, columns=["timestamp", "Open", "High", "Low", "Close", "Volume", "turnover"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"].astype(int), unit="ms")
+    df = df.sort_values("timestamp")
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        df[col] = df[col].astype(float)
+    df = df[["timestamp", "Open", "High", "Low", "Close", "Volume"]]
+    df.set_index("timestamp", inplace=True)
+    return df
+
+
+def fetch_bybit_candles(symbol, category, interval_minutes, limit=1000, days=backtest_days, latest_only=False):
+    """Fetch raw Bybit candles at the requested interval (no resampling).
+
+    When ``latest_only`` is True, a single call is made (bounded by ``limit``)
+    to avoid repeated full-history downloads inside the live loop.
+    """
+
     interval = str(interval_minutes)
+    url = "https://api.bybit.com/v5/market/kline"
+
+    if latest_only:
+        params = {
+            "category": category,
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if not resp.ok:
+            raise RuntimeError(f"Bybit API request failed with status {resp.status_code}: {resp.text}")
+        payload = resp.json()
+        if str(payload.get("retCode")) != "0":
+            raise RuntimeError(f"Bybit API returned error code {payload.get('retCode')}: {payload.get('retMsg')}")
+        rows = payload["result"].get("list", [])
+        if not rows:
+            raise ValueError(f"No candle data received from Bybit for {interval}-minute interval.")
+        return _parse_candles(rows)
+
     end = int(datetime.utcnow().timestamp())
     start = end - days * 24 * 60 * 60
     step = interval_minutes * 60
     df_list = []
 
     while start < end:
-        url = "https://api.bybit.com/v5/market/kline"
         params = {
             "category": category,
             "symbol": symbol,
             "interval": interval,
             "start": start * 1000,
-            "limit": limit
+            "limit": limit,
         }
         resp = requests.get(url, params=params, timeout=10)
         if not resp.ok:
@@ -53,16 +88,8 @@ def fetch_bybit_candles(symbol, category, interval_minutes, limit=1000, days=bac
         rows = payload["result"].get("list", [])
         if not rows:
             break
-        df = pd.DataFrame(rows, columns=[
-            "timestamp", "Open", "High", "Low", "Close", "Volume", "turnover"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"].astype(int), unit="ms")
-        df = df.sort_values("timestamp")
-        for col in ["Open", "High", "Low", "Close", "Volume"]:
-            df[col] = df[col].astype(float)
-        df = df[["timestamp", "Open", "High", "Low", "Close", "Volume"]]
-        df.set_index("timestamp", inplace=True)
-        df_list.append(df)
-        start = int(df.index[-1].timestamp()) + step
+        df_list.append(_parse_candles(rows))
+        start = int(pd.to_datetime(rows[-1][0], unit="ms").timestamp()) + step
         time.sleep(0.2)
 
     if not df_list:
@@ -277,6 +304,7 @@ state = {
         "position": 0,
         "entry_price": None,
         "entry_bar_time": None,
+        "last_bar_time": None,
         "liq_price": None,
         "tp_price": None,
         "qty": 0,
@@ -308,7 +336,8 @@ while True:   # INFINITE LOOP, stop with Ctrl+C
             params = best_params[tf]
             tf_state = state[tf]
 
-            df = fetch_bybit_candles(symbol, category, tf, days=3)
+            lookback_bars = max(int(params["imbalance"]), int(params["ema"])) + 50
+            df = fetch_bybit_candles(symbol, category, tf, limit=lookback_bars, latest_only=True)
             if len(df) < (params["imbalance"] + 10):
                 print(f"{nowstr} | {tf}m | Waiting for enough bars...")
                 continue
@@ -322,6 +351,11 @@ while True:   # INFINITE LOOP, stop with Ctrl+C
 
             row = data.iloc[-1]
             open_, high, low, close = row["Open"], row["High"], row["Low"], row["Close"]
+
+            if tf_state["last_bar_time"] is not None and tf_state["last_bar_time"] == row.name:
+                print(f"{nowstr} | {tf}m | Latest bar already processed – waiting for close.")
+                continue
+            tf_state["last_bar_time"] = row.name
 
             if float(params["pnl_value"]) <= 0:
                 print(f"{nowstr} | {tf}m | NO EDGE detected by optimizer – standing aside.")
