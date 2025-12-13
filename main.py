@@ -83,7 +83,7 @@ def bybit_fee_fn(notional):
     return notional * bybit_fee
 
 
-def simulate_order_fill(direction, mid_price, spread_bps, slippage_bps, reject_prob=0):
+def simulate_order_fill(direction, mid_price, spread_bps, slippage_bps, reject_prob=0, wait_latency=True):
     """Simulate Bybit-like fills including spread, slippage, and failures.
 
     Returns (fill_price, status) where status is "filled" or "rejected".
@@ -100,7 +100,8 @@ def simulate_order_fill(direction, mid_price, spread_bps, slippage_bps, reject_p
     else:
         fill_price = mid_price - spread - slippage_amt
 
-    time.sleep(random.uniform(0, max_fill_latency))
+    if wait_latency:
+        time.sleep(random.uniform(0, max_fill_latency))
     return fill_price, "filled"
 
 
@@ -166,7 +167,12 @@ def run_backtest(df, imbalance_lookback, ema_len, take_profit_pct):
         )
 
         if entry_cond and not in_liquidation:
-            entry_price = close
+            entry_price, status = simulate_order_fill(
+                "long", close, spread_bps, slippage_bps, order_reject_prob, wait_latency=False
+            )
+            if status == "rejected":
+                equity_curve.append(balance)
+                continue
             trade_value = balance * leverage
             qty = trade_value / entry_price
             entry_fee = bybit_fee_fn(qty * entry_price)
@@ -190,7 +196,13 @@ def run_backtest(df, imbalance_lookback, ema_len, take_profit_pct):
         # TP / EXIT (LONG)
         if position == 1 and not in_liquidation:
             if high >= tp_price:
-                exit_price = tp_price
+                desired_exit = tp_price
+                exit_price, status = simulate_order_fill(
+                    "short", desired_exit, spread_bps, slippage_bps, order_reject_prob, wait_latency=False
+                )
+                if status == "rejected":
+                    equity_curve.append(balance)
+                    continue
                 exit_fee = bybit_fee_fn(qty * exit_price)
                 gross = (exit_price - entry_price) * qty
                 net_pnl = gross - exit_fee
@@ -362,10 +374,9 @@ while True:   # INFINITE LOOP, stop with Ctrl+C
             else:
                 desired_exit = tp_price
                 exit_price, status = simulate_order_fill(
-                    "short", desired_exit, spread_bps, slippage_bps, order_reject_prob
+                    "short", desired_exit, spread_bps, slippage_bps, order_reject_prob, wait_latency=False
                 )
                 if status == "rejected":
-                    print(f"{nowstr} | EXIT SHORT rejected – simulated failure, position still open")
                     continue
                 gross = (exit_price - entry_price) * qty
                 exit_fee = bybit_fee_fn(qty * exit_price)
