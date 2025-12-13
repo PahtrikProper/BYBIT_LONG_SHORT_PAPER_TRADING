@@ -89,7 +89,8 @@ def fetch_bybit_candles(symbol, category, interval_minutes, limit=1000, days=bac
         if not rows:
             break
         df_list.append(_parse_candles(rows))
-        start = int(pd.to_datetime(rows[-1][0], unit="ms").timestamp()) + step
+        last_ts_ms = int(rows[-1][0])
+        start = int(pd.to_datetime(last_ts_ms, unit="ms").timestamp()) + step
         time.sleep(0.2)
 
     if not df_list:
